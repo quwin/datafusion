@@ -1186,6 +1186,25 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Unknown placeholder: $a";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
+    // out of range placeholder in an argument default expression; the default
+    // is substituted into the body at call time, so it must be validated too
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_default(a DOUBLE, b DOUBLE DEFAULT $9)
+        RETURNS DOUBLE
+        RETURN $1 + $2
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
+    // placeholder referencing an argument in a default expression is valid
+    let sql = r#"
+    CREATE FUNCTION good_placeholder_default(a DOUBLE, b DOUBLE DEFAULT $1)
+        RETURNS DOUBLE
+        RETURN $1 + $2
+    "#;
+    assert!(ctx.sql(sql).await.is_ok());
+
     // out of range placeholder inside a subquery
     let sql = r#"
     CREATE FUNCTION bad_placeholder_scalar_subquery(DOUBLE)

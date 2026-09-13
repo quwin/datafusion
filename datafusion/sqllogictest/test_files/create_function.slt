@@ -38,6 +38,10 @@ CREATE FUNCTION foo_zero () RETURNS DOUBLE RETURN $1;
 statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$9
 CREATE FUNCTION foo_subquery (DOUBLE) RETURNS DOUBLE RETURN $1 + (SELECT $9);
 
+# placeholders in argument default expressions are validated too
+statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$9
+CREATE FUNCTION foo_default (a DOUBLE, b DOUBLE DEFAULT $9) RETURNS DOUBLE RETURN $1 + $2;
+
 # multi-part identifiers are not supported
 statement error DataFusion error: This feature is not implemented: Qualified functions are not supported
 CREATE FUNCTION foo.bar (DOUBLE) RETURNS DOUBLE RETURN $1 + $2;

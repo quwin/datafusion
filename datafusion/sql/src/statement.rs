@@ -225,9 +225,10 @@ fn calc_inline_constraints_from_columns(columns: &[ColumnDef]) -> Vec<TableConst
     constraints
 }
 
-/// Rejects placeholders in a `CREATE FUNCTION` body that do not reference a
-/// declared argument (e.g. `$3` for a two-argument function) at definition
-/// time, instead of deferring the error to function invocation.
+/// Rejects placeholders in a `CREATE FUNCTION` body or argument default
+/// expression that do not reference a declared argument (e.g. `$3` for a
+/// two-argument function) at definition time, instead of deferring the error
+/// to function invocation.
 fn validate_function_body_placeholders(expr: &Expr, arg_count: usize) -> Result<()> {
     expr.apply(|expr| {
         if let Expr::Placeholder(placeholder) = expr {
@@ -1512,8 +1513,17 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
                     None => None,
                 };
 
+                let arg_count = args.as_ref().map_or(0, |declared| declared.len());
+                // Argument defaults can reference placeholders too; they are
+                // substituted at call time, so validate them with the same rule
+                for default_expr in args
+                    .iter()
+                    .flatten()
+                    .filter_map(|arg| arg.default_expr.as_ref())
+                {
+                    validate_function_body_placeholders(default_expr, arg_count)?;
+                }
                 if let Some(body) = &function_body {
-                    let arg_count = args.as_ref().map_or(0, |declared| declared.len());
                     validate_function_body_placeholders(body, arg_count)?;
                 }
 
