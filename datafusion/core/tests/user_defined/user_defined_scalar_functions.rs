@@ -1188,11 +1188,64 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Unknown placeholder: $a";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
+    // Out of range positional placeholder inside a subquery in the body;
+    // `Expr::apply` does not descend into subqueries, so these must be walked
+    // explicitly (see `validate_function_body_placeholders`)
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_scalar_subquery(DOUBLE)
+        RETURNS DOUBLE
+        RETURN $1 + (SELECT $9)
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_exists_subquery(DOUBLE)
+        RETURNS BOOLEAN
+        RETURN EXISTS (SELECT $9)
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
+    let sql = r#"
+    CREATE TABLE t (v DOUBLE) AS VALUES (1.0), (2.0)
+    "#;
+    ctx.sql(sql).await?.collect().await?;
+
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_in_subquery(DOUBLE)
+        RETURNS BOOLEAN
+        RETURN $1 IN (SELECT $9 FROM t)
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
+    // A placeholder nested two subqueries deep is validated too
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_nested_subquery(DOUBLE)
+        RETURNS BOOLEAN
+        RETURN EXISTS (SELECT 1 FROM t WHERE (SELECT $9) > 0.0)
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
     // Valid bodies must still be accepted
     let sql = r#"
     CREATE FUNCTION good_placeholder(DOUBLE, DOUBLE)
         RETURNS DOUBLE
         RETURN $1 + $2
+    "#;
+    assert!(ctx.sql(sql).await.is_ok());
+
+    // A valid placeholder inside a subquery must still be accepted
+    let sql = r#"
+    CREATE FUNCTION good_placeholder_subquery(DOUBLE)
+        RETURNS BOOLEAN
+        RETURN $1 IN (SELECT v FROM t WHERE v > $1)
     "#;
     assert!(ctx.sql(sql).await.is_ok());
 

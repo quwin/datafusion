@@ -43,6 +43,7 @@ use datafusion_common::{
 use datafusion_expr::dml::{
     CopyTo, InsertOp, MergeIntoAction, MergeIntoClause, MergeIntoClauseKind, MergeIntoOp,
 };
+use datafusion_expr::expr::{Exists, InSubquery, SetComparison};
 use datafusion_expr::expr_rewriter::normalize_col_with_schemas_and_ambiguity_check;
 use datafusion_expr::logical_plan::DdlStatement;
 use datafusion_expr::logical_plan::builder::project;
@@ -222,6 +223,61 @@ fn calc_inline_constraints_from_columns(columns: &[ColumnDef]) -> Vec<TableConst
         }
     }
     constraints
+}
+
+/// Reject placeholders in a `CREATE FUNCTION` `RETURN` body that do not
+/// reference a declared argument. Without this check, an invalid definition
+/// such as `RETURN $1 + $3` for a function declared with two arguments is
+/// only rejected when the function is invoked (by FunctionFactories that
+/// substitute placeholders at call time), rather than at CREATE FUNCTION
+/// time.
+fn validate_function_body_placeholders(expr: &Expr, arg_count: usize) -> Result<()> {
+    expr.apply(|expr| {
+        if let Expr::Placeholder(placeholder) = expr {
+            match placeholder
+                .id
+                .strip_prefix('$')
+                .and_then(|id| id.parse::<usize>().ok())
+            {
+                // Positional placeholder within the declared
+                // argument list (e.g. `$2` with two arguments)
+                Some(idx) if (1..=arg_count).contains(&idx) => {}
+                // Positional placeholder that is out of range
+                Some(_) => {
+                    return plan_err!(
+                        "Invalid placeholder, out of range: {}",
+                        placeholder.id
+                    );
+                }
+                // A named placeholder can only survive parsing
+                // when no arguments were declared
+                None => {
+                    return plan_err!("Unknown placeholder: {}", placeholder.id);
+                }
+            }
+        }
+        // `Expr::apply` stops at subquery boundaries (see
+        // `Expr::apply_children`), so walk the subquery's plan explicitly to
+        // validate placeholders inside it as well.
+        if let Some(subquery) = match expr {
+            Expr::ScalarSubquery(subquery) => Some(&subquery.subquery),
+            Expr::Exists(Exists { subquery, .. }) => Some(&subquery.subquery),
+            Expr::InSubquery(InSubquery { subquery, .. }) => Some(&subquery.subquery),
+            Expr::SetComparison(SetComparison { subquery, .. }) => {
+                Some(&subquery.subquery)
+            }
+            _ => None,
+        } {
+            subquery.apply_with_subqueries(|plan| {
+                plan.apply_expressions(|e| {
+                    validate_function_body_placeholders(e, arg_count)?;
+                    Ok(TreeNodeRecursion::Continue)
+                })
+            })?;
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
 }
 
 impl<S: ContextProvider> SqlToRel<'_, S> {
@@ -1462,43 +1518,9 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
                     None => None,
                 };
 
-                // Reject placeholders in the RETURN body that do not reference
-                // a declared argument. Without this check, an invalid
-                // definition such as `RETURN $1 + $3` for a function declared
-                // with two arguments is only rejected when the function is
-                // invoked (by FunctionFactories that substitute placeholders
-                // at call time), rather than at CREATE FUNCTION time.
                 if let Some(body) = &function_body {
                     let arg_count = args.as_ref().map_or(0, |declared| declared.len());
-                    body.apply(|expr| {
-                        if let Expr::Placeholder(placeholder) = expr {
-                            match placeholder
-                                .id
-                                .strip_prefix('$')
-                                .and_then(|id| id.parse::<usize>().ok())
-                            {
-                                // Positional placeholder within the declared
-                                // argument list (e.g. `$2` with two arguments)
-                                Some(idx) if (1..=arg_count).contains(&idx) => {}
-                                // Positional placeholder that is out of range
-                                Some(_) => {
-                                    return plan_err!(
-                                        "Invalid placeholder, out of range: {}",
-                                        placeholder.id
-                                    );
-                                }
-                                // A named placeholder can only survive parsing
-                                // when no arguments were declared
-                                None => {
-                                    return plan_err!(
-                                        "Unknown placeholder: {}",
-                                        placeholder.id
-                                    );
-                                }
-                            }
-                        }
-                        Ok(TreeNodeRecursion::Continue)
-                    })?;
+                    validate_function_body_placeholders(body, arg_count)?;
                 }
 
                 let params = CreateFunctionBody {

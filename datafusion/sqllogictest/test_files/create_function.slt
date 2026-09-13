@@ -34,6 +34,11 @@ CREATE FUNCTION foo (DOUBLE) RETURNS DOUBLE RETURN $1 + $2;
 statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$1
 CREATE FUNCTION foo_zero () RETURNS DOUBLE RETURN $1;
 
+# Placeholders inside subqueries in the body are validated as well (`Expr::apply`
+# does not descend into subqueries, so their plans are walked explicitly)
+statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$9
+CREATE FUNCTION foo_subquery (DOUBLE) RETURNS DOUBLE RETURN $1 + (SELECT $9);
+
 # multi-part identifiers are not supported
 statement error DataFusion error: This feature is not implemented: Qualified functions are not supported
 CREATE FUNCTION foo.bar (DOUBLE) RETURNS DOUBLE RETURN $1 + $2;
