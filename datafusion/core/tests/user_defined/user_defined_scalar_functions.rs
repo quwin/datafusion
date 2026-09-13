@@ -1125,7 +1125,7 @@ async fn create_scalar_function_from_sql_statement() -> Result<()> {
     "#;
     assert!(ctx.sql(bad_definition_sql).await.is_err());
 
-    // Definitions with invalid placeholders are rejected at definition time
+    // invalid placeholders are rejected at definition time
     let bad_expression_sql = r#"
     CREATE FUNCTION better_add(DOUBLE, DOUBLE)
         RETURNS DOUBLE
@@ -1146,8 +1146,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let function_factory = Arc::new(CustomFunctionFactory::default());
     let ctx = SessionContext::new().with_function_factory(function_factory.clone());
 
-    // Out of range positional placeholder in the body of a function declared
-    // with positional arguments
+    // out of range placeholder, positional declared args
     let sql = r#"
     CREATE FUNCTION bad_placeholder_pos(DOUBLE, DOUBLE)
         RETURNS DOUBLE
@@ -1157,8 +1156,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Invalid placeholder, out of range: $3";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // Out of range positional placeholder in the body of a function declared
-    // with named arguments
+    // out of range placeholder, named declared args
     let sql = r#"
     CREATE FUNCTION bad_placeholder_named(a DOUBLE, b DOUBLE)
         RETURNS DOUBLE
@@ -1168,7 +1166,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Invalid placeholder, out of range: $3";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // Placeholder in the body of a function declared with no arguments
+    // placeholder with zero declared args
     let sql = r#"
     CREATE FUNCTION bad_placeholder_zero_args()
         RETURNS DOUBLE
@@ -1178,7 +1176,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Invalid placeholder, out of range: $1";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // Named placeholder in the body of a function declared with no arguments
+    // named placeholder with zero declared args
     let sql = r#"
     CREATE FUNCTION bad_placeholder_unknown_name()
         RETURNS DOUBLE
@@ -1188,9 +1186,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Unknown placeholder: $a";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // Out of range positional placeholder inside a subquery in the body;
-    // `Expr::apply` does not descend into subqueries, so these must be walked
-    // explicitly (see `validate_function_body_placeholders`)
+    // out of range placeholder inside a subquery
     let sql = r#"
     CREATE FUNCTION bad_placeholder_scalar_subquery(DOUBLE)
         RETURNS DOUBLE
@@ -1223,7 +1219,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Invalid placeholder, out of range: $9";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // A placeholder nested two subqueries deep is validated too
+    // placeholder nested two subqueries deep
     let sql = r#"
     CREATE FUNCTION bad_placeholder_nested_subquery(DOUBLE)
         RETURNS BOOLEAN
@@ -1233,7 +1229,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     let expected = "Error during planning: Invalid placeholder, out of range: $9";
     assert!(expected.starts_with(&err.strip_backtrace()));
 
-    // Valid bodies must still be accepted
+    // valid body
     let sql = r#"
     CREATE FUNCTION good_placeholder(DOUBLE, DOUBLE)
         RETURNS DOUBLE
@@ -1241,7 +1237,7 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     "#;
     assert!(ctx.sql(sql).await.is_ok());
 
-    // A valid placeholder inside a subquery must still be accepted
+    // valid placeholder inside a subquery
     let sql = r#"
     CREATE FUNCTION good_placeholder_subquery(DOUBLE)
         RETURNS BOOLEAN

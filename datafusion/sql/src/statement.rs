@@ -225,12 +225,9 @@ fn calc_inline_constraints_from_columns(columns: &[ColumnDef]) -> Vec<TableConst
     constraints
 }
 
-/// Reject placeholders in a `CREATE FUNCTION` `RETURN` body that do not
-/// reference a declared argument. Without this check, an invalid definition
-/// such as `RETURN $1 + $3` for a function declared with two arguments is
-/// only rejected when the function is invoked (by FunctionFactories that
-/// substitute placeholders at call time), rather than at CREATE FUNCTION
-/// time.
+/// Rejects placeholders in a `CREATE FUNCTION` body that do not reference a
+/// declared argument (e.g. `$3` for a two-argument function) at definition
+/// time, instead of deferring the error to function invocation.
 fn validate_function_body_placeholders(expr: &Expr, arg_count: usize) -> Result<()> {
     expr.apply(|expr| {
         if let Expr::Placeholder(placeholder) = expr {
@@ -239,26 +236,23 @@ fn validate_function_body_placeholders(expr: &Expr, arg_count: usize) -> Result<
                 .strip_prefix('$')
                 .and_then(|id| id.parse::<usize>().ok())
             {
-                // Positional placeholder within the declared
-                // argument list (e.g. `$2` with two arguments)
+                // In range, e.g. `$2` with two declared arguments
                 Some(idx) if (1..=arg_count).contains(&idx) => {}
-                // Positional placeholder that is out of range
+                // Out of range, e.g. `$3` with two declared arguments
                 Some(_) => {
                     return plan_err!(
                         "Invalid placeholder, out of range: {}",
                         placeholder.id
                     );
                 }
-                // A named placeholder can only survive parsing
-                // when no arguments were declared
+                // Named placeholder, only possible with no declared arguments
                 None => {
                     return plan_err!("Unknown placeholder: {}", placeholder.id);
                 }
             }
         }
-        // `Expr::apply` stops at subquery boundaries (see
-        // `Expr::apply_children`), so walk the subquery's plan explicitly to
-        // validate placeholders inside it as well.
+        // `Expr::apply` does not descend into subqueries, so walk their
+        // plans explicitly to validate placeholders inside them
         if let Some(subquery) = match expr {
             Expr::ScalarSubquery(subquery) => Some(&subquery.subquery),
             Expr::Exists(Exists { subquery, .. }) => Some(&subquery.subquery),
