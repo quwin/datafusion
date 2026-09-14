@@ -1205,6 +1205,20 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     "#;
     assert!(ctx.sql(sql).await.is_ok());
 
+    // named placeholder in a default expression; defaults are substituted by
+    // position at call time, so a named id can never be resolved there
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_named_default(a DOUBLE, b DOUBLE DEFAULT $a)
+        RETURNS DOUBLE
+        RETURN $1 + $2
+    "#;
+    let err = ctx
+        .sql(sql)
+        .await
+        .expect_err("named placeholder in default");
+    let expected = "Error during planning: Unknown placeholder: $a";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
     // out of range placeholder inside a subquery
     let sql = r#"
     CREATE FUNCTION bad_placeholder_scalar_subquery(DOUBLE)
@@ -1243,6 +1257,16 @@ async fn create_scalar_function_from_sql_statement_invalid_placeholders() -> Res
     CREATE FUNCTION bad_placeholder_nested_subquery(DOUBLE)
         RETURNS BOOLEAN
         RETURN EXISTS (SELECT 1 FROM t WHERE (SELECT $9) > 0.0)
+    "#;
+    let err = ctx.sql(sql).await.expect_err("out of range placeholder");
+    let expected = "Error during planning: Invalid placeholder, out of range: $9";
+    assert!(expected.starts_with(&err.strip_backtrace()));
+
+    // out of range placeholder in a subquery's LIMIT clause
+    let sql = r#"
+    CREATE FUNCTION bad_placeholder_subquery_limit(DOUBLE)
+        RETURNS BOOLEAN
+        RETURN $1 IN (SELECT v FROM t LIMIT $9)
     "#;
     let err = ctx.sql(sql).await.expect_err("out of range placeholder");
     let expected = "Error during planning: Invalid placeholder, out of range: $9";

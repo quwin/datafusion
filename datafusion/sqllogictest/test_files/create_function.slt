@@ -42,6 +42,10 @@ CREATE FUNCTION foo_subquery (DOUBLE) RETURNS DOUBLE RETURN $1 + (SELECT $9);
 statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$9
 CREATE FUNCTION foo_default (a DOUBLE, b DOUBLE DEFAULT $9) RETURNS DOUBLE RETURN $1 + $2;
 
+# out of range placeholder in a subquery's ORDER BY / LIMIT clauses
+statement error DataFusion error: Error during planning: Invalid placeholder, out of range: \$9
+CREATE FUNCTION foo_limit (DOUBLE) RETURNS BOOLEAN RETURN $1 IN (SELECT v FROM (VALUES (1.0), (2.0)) AS t(v) ORDER BY v LIMIT $9);
+
 # multi-part identifiers are not supported
 statement error DataFusion error: This feature is not implemented: Qualified functions are not supported
 CREATE FUNCTION foo.bar (DOUBLE) RETURNS DOUBLE RETURN $1 + $2;
